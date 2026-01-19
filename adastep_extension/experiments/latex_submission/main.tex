@@ -68,7 +68,7 @@ While this approach amortizes the heavy inference cost over $k$ steps, current m
 The theoretical foundation of our adaptive approach lies in \textbf{Event-Triggered Control (ETC)} \cite{heemels2012introduction}. In classical ETC, control signals are updated only when the system state deviates beyond a desired trajectory beyond a safety threshold, rather than at fixed time intervals. This paradigm is proven to minimize communication and computation resources while guaranteeing stability.
 However, applying classical ETC to vision-based robot learning is challenging due to the lack of explicit analytical dynamics models. In this work, we bridge this gap by learning a \textbf{visual event-trigger}---predicting the ``safe horizon'' directly from high-dimensional visual embeddings, effectively realizing ETC in the context of neural policies.
 
-\textbf{Note on offline evaluation.} Offline replay of expert demonstrations can mask open-loop fragility: deterministic, expert-generated trajectories can remain successful under large open-loop horizons when merely replayed. To expose robustness differences we (i) report a $\lambda$-sensitivity analysis (Fig.~X) and (ii) introduce a noise-injection robustness proxy and closed-loop validation in Sec.~\ref{sec:robustness}. These complementary evaluations demonstrate that AdaStep permits explicit tuning of conservatism for deployment risk profiles.
+\textbf{Note on offline evaluation.} Offline replay of expert demonstrations can mask open-loop fragility: deterministic, expert-generated trajectories can remain successful under large open-loop horizons when merely replayed. To expose robustness differences we (i) report a $\lambda$-sensitivity analysis (Fig.~X) and (ii) introduce a noise-injection robustness proxy and closed-loop validation in Sec.~\ref{sec:robustness}. These complementary evaluations show that, for the offline datasets used here, AdaStep can substantially reduce inference without necessarily degrading success rate; however, this outcome depends on dataset coverage and environment uncertainty. High $\lambda$ values that appear favorable in offline replay may be fragile in closed-loop — therefore $\lambda$ should be treated as a deployment tunable and validated with small-scale closed-loop tests (see Sec.~\ref{sec:deployment_guidance}).
 
 \section{Method}
 
@@ -130,7 +130,7 @@ First, we calculate the error distribution across the entire dataset and determi
 \begin{equation}
 k_j^* = \max \{ k \mid \bar{E}_j(k) + \lambda \cdot \sigma_j(k) < \delta_{\text{safe}} \}
 \end{equation}
-where $\bar{E}_j(k)$ and $\sigma_j(k)$ are the mean and standard deviation of the cumulative error within cluster $\mathcal{C}_j$ at step $k$, and $\lambda$ is a safety coefficient. We empirically found that $\lambda=1.0$ effectively balances safety and efficiency; larger values lead to overly conservative horizons while smaller values risk trajectory divergence.
+where $\bar{E}_j(k)$ and $\sigma_j(k)$ are the mean and standard deviation of the cumulative error within cluster $\mathcal{C}_j$ at step $k$, and $\lambda$ is a safety coefficient. In our offline experiments (Sec.~\ref{sec:experiments}) a value near $\lambda=1.0$ provided a reasonable trade-off for the Square task, but the optimal setting depends on task specifics, dataset coverage and sensing/dynamics noise. Based on the sensitivity and noise‑injection studies reported here, we recommend initializing $\lambda$ in $[0.5,1.5]$ for deployment and tuning it via small closed‑loop trials (Sec.~\ref{sec:deployment_guidance}).
 
 The safety coefficient $\lambda$ explicitly parameterizes the system's risk aversion: increasing $\lambda$ raises tolerance to intra-cluster variance (yielding more aggressive, larger horizons), whereas decreasing $\lambda$ enforces conservatism. In practice $\lambda$ therefore acts as a user-configurable knob for the risk–efficiency trade-off and should be chosen according to deployment requirements (see Sec.~\ref{sec:experiments} and Fig.~\ref{fig:lambda_sensitivity} for a sensitivity study).
 
@@ -229,10 +229,20 @@ To interpret how AdaStep achieves this performance, we analyze the statistical p
 The parameter $\lambda$ controls the conservatism of the Pareto frontier. We evaluated AdaStep with varying $\lambda \in \{0.5, 1.0, 2.0\}$ on the Square task to analyze its impact on execution behavior.
 \begin{itemize}
 \item \textbf{Conservative ($\lambda=0.5$)}: The system yields a low mean horizon of $\bar{k}=7.0$, prioritizing safety but sacrificing efficiency.
-\item \textbf{Balanced ($\lambda=1.0$)}: This setting achieves a mean horizon of $\bar{k}=35.5$, effectively capturing the stable free-space motion while maintaining robust error bounds.
+\item \textbf{Balanced ($\lambda=1.0$)}: This setting achieves a mean horizon of $\bar{k}=35.5$, effectively capturing the stable free-space motion while maintaining robust error bounds in the offline dataset.
 \item \textbf{Aggressive ($\lambda=2.0$)}: Increasing $\lambda$ further marginally increases the horizon to $\bar{k}=38.5$ but leads to diminishing returns in efficiency while increasing the risk of trajectory divergence.
 \end{itemize}
-This analysis confirms that $\lambda=1.0$ provides the optimal operating point for the Square task.
+For the Square offline dataset $\lambda\approx1.0$ is a reasonable operating point for balancing measured (offline) error bounds and efficiency. However, the noise‑injection proxy and our closed‑loop checks (Sec.~\ref{sec:robustness}) demonstrate that larger $\lambda$ can increase sensitivity to perceptual or execution perturbations; consequently, an offline optimum does not guarantee closed‑loop robustness.
+
+\subsection{Deployment guidance: choosing $\lambda$}\label{sec:deployment_guidance}
+We provide a pragmatic procedure to select $\lambda$ prior to large‑scale deployment:
+\begin{enumerate}
+  \item Initialize $\lambda$ in the conservative-to-balanced range $[0.5,1.0]$.
+  \item Run small‑scale closed‑loop trials (10--30 episodes) in the target environment and monitor: task success rate, mean and standard deviation of predicted $k$, and observed failure modes.
+  \item If closed‑loop success remains high and $k$ variance is low, increase $\lambda$ in small increments (e.g. +0.5) and repeat step 2 until the desired inference savings are achieved without new failures.
+  \item For environments with substantial sensing or dynamics noise, prefer $\lambda\leq1.0$ and enable online safety checks (e.g. re‑query predictor on high prediction variance or fall back to conservative horizons).
+\end{enumerate}
+As a pragmatic default for robot deployment we suggest reporting results with $\lambda\in[0.5,1.5]$ and including closed‑loop validation details when releasing experimental claims.
 
 \begin{figure}[t]
   \centering
@@ -244,12 +254,12 @@ This analysis confirms that $\lambda=1.0$ provides the optimal operating point f
 % ---- lambda sensitivity summary table ----
 \begin{table}[t]
 \centering
-\caption{\textbf{\(\lambda\) 敏感性（Square，离线评估）}. $\bar{k}$ 为平均预测步长；Accuracy 为离线轨迹完成率。}
+\caption{\textbf{\(\lambda\) sensitivity (Square, offline evaluation)}. $\bar{k}$ denotes mean predicted horizon; \texttt{Accuracy} reports offline trajectory completion rate.}
 \label{tab:lambda_sensitivity}
 \small
 \begin{tabular}{c c c c}
 \hline
-$\lambda$ & $\bar{k}$ & 采样范围 (min--max) & 成功率 (离线) \\
+$\lambda$ & $\bar{k}$ & sample range (min--max) & success rate (offline) \\
 \hline
 0.5 & 6.0 & 5--10 & 73.6\% \\
 1.0 & 36.5 & 25--50 & 14.2\% \\
@@ -258,7 +268,7 @@ $\lambda$ & $\bar{k}$ & 采样范围 (min--max) & 成功率 (离线) \\
 \hline
 \end{tabular}
 \vspace{2pt}
-\flushleft\footnotesize{注：离线成功率基于对专家演示的回放；高离线成功率并不一定意味着闭环鲁棒，参见下文的噪声敏感性分析。}
+\flushleft\footnotesize{Note: offline success rate is measured by replaying expert demonstrations; high offline success does not necessarily imply closed‑loop robustness — see the noise‑sensitivity analysis below.}
 \end{table}
 
 \subsection{Robustness: noise-injection proxy}\label{sec:robustness}
@@ -274,12 +284,12 @@ To complement offline replay metrics we evaluate a noise-injection robustness pr
 % ---- noise-sensitivity summary (moderate noise std = 0.02) ----
 \begin{table}[t]
 \centering
-\caption{Noise‑injection代理（state noise std = 0.02）——平均 $|\Delta k|$ 与显著变化比例。较大 $\lambda$ 对小幅扰动更敏感，显示闭环脆弱性上升。}
+\caption{Noise‑injection proxy (state noise std = 0.02) — mean $|\Delta k|$ and fraction of significant changes. Larger $\lambda$ is more sensitive to small perturbations, indicating increased closed‑loop fragility.}
 \label{tab:noise_proxy}
 \small
 \begin{tabular}{c c c}
 \hline
-$\lambda$ & mean $|\Delta k|$ (noise=0.02) & 比例 $|\Delta k|\ge 1$ \\
+$\lambda$ & mean $|\Delta k|$ (noise=0.02) & fraction $|\Delta k|\ge 1$ \\
 \hline
 0.5 & 0.00173 & 0.17\% \\
 1.0 & 0.01412 & 1.41\% \\
@@ -288,7 +298,7 @@ $\lambda$ & mean $|\Delta k|$ (noise=0.02) & 比例 $|\Delta k|\ge 1$ \\
 \hline
 \end{tabular}
 \vspace{2pt}
-\flushleft\footnotesize{注：表中数值来自离线代理（参见 experiments/noise_sensitivity_proxy.py）；$|\Delta k|$ 为在加噪声前后预测步长的绝对差的均值。}
+\flushleft\footnotesize{Note: values are from the offline proxy (see \texttt{experiments/noise_sensitivity_proxy.py}); $|\Delta k|$ is the mean absolute difference in predicted horizon before/after perturbation.}
 \end{table}
 
 \subsection{Multi-Task Generalization}
