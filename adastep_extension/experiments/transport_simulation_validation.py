@@ -130,6 +130,30 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
     )
     print(f"✓ 环境: {env.name}")
 
+    # probe environment for action dimensionality (robust to wrappers)
+    action_dim = None
+    try:
+        action_dim = int(getattr(env, 'action_dim', None) or getattr(env, 'action_size', None))
+    except Exception:
+        action_dim = None
+    if action_dim is None:
+        try:
+            action_dim = env.action_space.shape[0]
+        except Exception:
+            action_dim = None
+    # fallback: infer from dataset demo actions
+    if action_dim is None:
+        try:
+            import h5py
+            with h5py.File(hdf5_path, 'r') as f:
+                first_demo = next(iter(f['data'].keys()))
+                demo_grp = f[f'data/' + first_demo]
+                if 'actions' in demo_grp:
+                    action_dim = demo_grp['actions'].shape[1]
+        except Exception:
+            action_dim = None
+    print(f"Detected action_dim={action_dim}")
+
     # Ensure ObsUtils is initialized (some robomimic/robosuite builds expect this before reset)
     try:
         import robomimic.utils.obs_utils as ObsUtils
@@ -223,7 +247,7 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
 
             # 执行动作 (使用专家动作或简单策略)
             # 这里使用简单的启发式策略来完成transport任务
-            action = compute_transport_action(obs, phase, env=env)
+            action = compute_transport_action(obs, phase, action_dim=action_dim)
 
             # 执行动作并（可选）保存诊断帧
             obs, reward, done, info = env.step(action)
@@ -313,7 +337,7 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
     return results_summary
 
 
-def compute_transport_action(obs, phase, env=None):
+def compute_transport_action(obs, phase, env=None, action_dim=None):
     """Compute a heuristic action that supports single- and two-arm envs.
 
     - For single-arm envs the action is [dx,dy,dz, gripper].
@@ -355,6 +379,13 @@ def compute_transport_action(obs, phase, env=None):
         except Exception:
             action_dim = None
 
+    # debug/info: log detected action_dim and base size (helps diagnose mismatches)
+    try:
+        _ad = action_dim if action_dim is not None else 'None'
+        print(f"[compute_transport_action] detected action_dim={_ad}, base_size={base_action.size}")
+    except Exception:
+        pass
+
     # if unknown, return single-arm action
     if action_dim is None or action_dim == base_action.size:
         return base_action
@@ -374,6 +405,7 @@ def compute_transport_action(obs, phase, env=None):
         if action_dim >= 14:
             expanded[13] = expanded[3]
 
+    print(f"[compute_transport_action] returning expanded action (len={len(expanded)})")
     return expanded
 
 
