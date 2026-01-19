@@ -241,6 +241,26 @@ This analysis confirms that $\lambda=1.0$ provides the optimal operating point f
   \label{fig:lambda_sensitivity}
 \end{figure}
 
+% ---- lambda sensitivity summary table ----
+\begin{table}[t]
+\centering
+\caption{\textbf{\(\lambda\) 敏感性（Square，离线评估）}. $\bar{k}$ 为平均预测步长；Accuracy 为离线轨迹完成率。}
+\label{tab:lambda_sensitivity}
+\small
+\begin{tabular}{c c c c}
+\hline
+$\lambda$ & $\bar{k}$ & 采样范围 (min--max) & 成功率 (离线) \\
+\hline
+0.5 & 6.0 & 5--10 & 73.6\% \\
+1.0 & 36.5 & 25--50 & 14.2\% \\
+2.0 & 38.5 & 35--40 & 59.8\% \\
+3.0 & 42.2 & 36--50 & 100.0\% \\
+\hline
+\end{tabular}
+\vspace{2pt}
+\flushleft\footnotesize{注：离线成功率基于对专家演示的回放；高离线成功率并不一定意味着闭环鲁棒，参见下文的噪声敏感性分析。}
+\end{table}
+
 \subsection{Robustness: noise-injection proxy}\label{sec:robustness}
 To complement offline replay metrics we evaluate a noise-injection robustness proxy: small perturbations are applied to state observations and the resulting change in predicted horizon (and an aggregated fragility score) is measured. This proxy reflects the sensitivity of the learned horizon policy to input disturbances and correlates with closed-loop robustness (see Appendix~B for details). Figure~\ref{fig:noise_sensitivity} reports fragility vs. $\lambda$ (higher fragility indicates larger sensitivity to small perturbations).
 
@@ -250,6 +270,26 @@ To complement offline replay metrics we evaluate a noise-injection robustness pr
   \caption{Noise-sensitivity proxy: mean absolute change in predicted horizon under state perturbations (varied noise std). Higher $\lambda$ yields larger sensitivity to input noise, indicating increased closed-loop fragility for aggressive horizons.}
   \label{fig:noise_sensitivity}
 \end{figure}
+
+% ---- noise-sensitivity summary (moderate noise std = 0.02) ----
+\begin{table}[t]
+\centering
+\caption{Noise‑injection代理（state noise std = 0.02）——平均 $|\Delta k|$ 与显著变化比例。较大 $\lambda$ 对小幅扰动更敏感，显示闭环脆弱性上升。}
+\label{tab:noise_proxy}
+\small
+\begin{tabular}{c c c}
+\hline
+$\lambda$ & mean $|\Delta k|$ (noise=0.02) & 比例 $|\Delta k|\ge 1$ \\
+\hline
+0.5 & 0.00173 & 0.17\% \\
+1.0 & 0.01412 & 1.41\% \\
+2.0 & 0.01815 & 1.82\% \\
+3.0 & 0.02651 & 2.65\% \\
+\hline
+\end{tabular}
+\vspace{2pt}
+\flushleft\footnotesize{注：表中数值来自离线代理（参见 experiments/noise_sensitivity_proxy.py）；$|\Delta k|$ 为在加噪声前后预测步长的绝对差的均值。}
+\end{table}
 
 \subsection{Multi-Task Generalization}
 To validate the generalization capability of AdaStep, we extended our evaluation to two additional tasks from the Robomimic suite: \textbf{Lift} (simple object lifting) and \textbf{Can} (complex pick-and-place).
