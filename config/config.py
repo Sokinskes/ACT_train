@@ -50,7 +50,15 @@ POLICY_CONFIG = {
     'nheads': 8,
     'camera_names': ['front'],
     'policy_class': 'ACT',
-    'temporal_agg': False
+    'temporal_agg': False,
+    
+    # AdaStep 自适应步长配置
+    'use_adastep': True,           # 是否启用 AdaStep
+    'k_min': 5,                    # 最小执行步长（复杂状态：精密操作）
+    'k_max': 50,                   # 最大执行步长（简单状态：大范围移动）
+    'horizon_weight': 1.0,         # 步长预测损失权重
+    'num_clusters': 3,             # K-Means 聚类数量
+    'error_threshold': 0.02,       # 帕累托分析的误差阈值
 }
 
 # training config

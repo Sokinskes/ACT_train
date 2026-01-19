@@ -13,3 +13,9 @@ pyquaternion
 opencv-python
 dynamixel-sdk
 git+https://github.com/Shaka-Labs/detr.git
+
+# AdaStep 额外依赖
+scikit-learn>=1.0.0  # K-Means聚类
+numpy>=1.21.0
+torch>=1.12.0
+torchvision>=0.13.0

@@ -1,0 +1,48 @@
+\relax 
+\citation{zhao2023learning}
+\citation{chi2023diffusion}
+\citation{zhao2023learning}
+\citation{chi2023diffusion}
+\citation{brohan2023rt1}
+\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {II}Background}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-A}}Inference Latency in VLA Models}{1}{}\protected@file@percent }
+\citation{heemels2012introduction}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Visualization of adaptive horizon behavior. The trajectory is color-coded by the predicted horizon $k$. Blue segments indicate precise control (small $k$) during insertion, while red segments indicate efficient motion (large $k$) in free space. This state-level adaptability enables AdaStep to optimize the efficiency-precision trade-off dynamically.}}{2}{}\protected@file@percent }
+\newlabel{fig:teaser}{{1}{2}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-B}}The Paradigm of Action Chunking}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-C}}Event-Triggered Control Theory}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {III}Method}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-A}}Problem Formulation and Error Dynamics}{2}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces The AdaStep Architecture. A shared frozen visual encoder extracts state embeddings, which are simultaneously fed into the base ACT policy and the lightweight Horizon Predictor. The predictor dynamically determines the safe execution horizon $k_t$, enabling the system to execute a variable-length action chunk $a_{t:t+k_t}$. Note that the control signal (orange arrow) from the Horizon Predictor modulates the execution phase.}}{3}{}\protected@file@percent }
+\newlabel{fig:arch}{{2}{3}}
+\newlabel{eq:objective}{{3}{3}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-B}}Manifold-Aware State Clustering}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-C}}Dynamic Thresholding \& Pareto Analysis}{3}{}\protected@file@percent }
+\citation{mandlekar2021matters}
+\citation{zhao2023learning}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Efficiency vs. Accuracy Pareto Frontier. AdaStep (star) dominates fixed-horizon baselines, achieving higher success rates at comparable efficiency levels.}}{4}{}\protected@file@percent }
+\newlabel{fig:pareto}{{3}{4}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-D}}Horizon Predictor Learning}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {IV}Experiments}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Experimental Setup}{4}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Temporal evolution of the predicted horizon $k$. The agent dynamically adjusts $k$ (blue line) in response to changing state complexity, exhibiting high responsiveness yet varying stability. Note the adaptive reduction of $k$ during the insertion phase (around step 150).}}{4}{}\protected@file@percent }
+\newlabel{fig:timeline}{{4}{4}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Efficiency \& Accuracy Analysis}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Adaptive Behavior Analysis}{4}{}\protected@file@percent }
+\bibstyle{IEEEtran}
+\bibdata{references}
+\bibcite{zhao2023learning}{1}
+\bibcite{chi2023diffusion}{2}
+\bibcite{brohan2023rt1}{3}
+\bibcite{heemels2012introduction}{4}
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Quantitative Comparison on Robomimic Square Task. Note: ``Ref'' denotes the reference performance from the original paper/oracle.}}{5}{}\protected@file@percent }
+\newlabel{tab:results}{{I}{5}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Distribution of predicted horizon values. Left: Baseline (few modes). Right: AdaStep (diverse modes). The increased entropy (1.583 vs 0.872) reflects the learned manifold-aware granularity. Note the \textbf  {multi-modal} distribution of AdaStep compared to the single mode of Baseline.}}{5}{}\protected@file@percent }
+\newlabel{fig:histogram}{{5}{5}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Generalization to Long-Horizon Navigation}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-E}}Ablation Study: Manifold-Awareness}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {V}Conclusion}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{5}{}\protected@file@percent }
+\bibcite{mandlekar2021matters}{5}
+\gdef \@abspage@last{6}

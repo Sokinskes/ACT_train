@@ -1,0 +1,62 @@
+[
+  {
+    "task": "square",
+    "k": 5,
+    "status": "failed",
+    "error": "Command '['/home/yhj/anaconda3/bin/python', 'eval_offline_trajectory.py', '--task', 'square', '--fixed_k', '5', '--device', 'cuda']' returned non-zero exit status 2."
+  },
+  {
+    "task": "square",
+    "k": 10,
+    "status": "failed",
+    "error": "Command '['/home/yhj/anaconda3/bin/python', 'eval_offline_trajectory.py', '--task', 'square', '--fixed_k', '10', '--device', 'cuda']' returned non-zero exit status 2."
+  },
+  {
+    "task": "square",
+    "k": 20,
+    "status": "failed",
+    "error": "Command '['/home/yhj/anaconda3/bin/python', 'eval_offline_trajectory.py', '--task', 'square', '--fixed_k', '20', '--device', 'cuda']' returned non-zero exit status 2."
+  },
+  {
+    "task": "square",
+    "k": 30,
+    "status": "failed",
+    "error": "Command '['/home/yhj/anaconda3/bin/python', 'eval_offline_trajectory.py', '--task', 'square', '--fixed_k', '30', '--device', 'cuda']' returned non-zero exit status 2."
+  },
+  {
+    "task": "square",
+    "k": 50,
+    "status": "failed",
+    "error": "Command '['/home/yhj/anaconda3/bin/python', 'eval_offline_trajectory.py', '--task', 'square', '--fixed_k', '50', '--device', 'cuda']' returned non-zero exit status 2."
+  },
+  {
+    "task": "transport",
+    "k": 5,
+    "status": "failed",
+    "error": "Command '['/home/yhj/anaconda3/bin/python', 'eval_offline_trajectory.py', '--task', 'transport', '--fixed_k', '5', '--device', 'cuda']' returned non-zero exit status 2."
+  },
+  {
+    "task": "transport",
+    "k": 10,
+    "status": "failed",
+    "error": "Command '['/home/yhj/anaconda3/bin/python', 'eval_offline_trajectory.py', '--task', 'transport', '--fixed_k', '10', '--device', 'cuda']' returned non-zero exit status 2."
+  },
+  {
+    "task": "transport",
+    "k": 20,
+    "status": "failed",
+    "error": "Command '['/home/yhj/anaconda3/bin/python', 'eval_offline_trajectory.py', '--task', 'transport', '--fixed_k', '20', '--device', 'cuda']' returned non-zero exit status 2."
+  },
+  {
+    "task": "transport",
+    "k": 30,
+    "status": "failed",
+    "error": "Command '['/home/yhj/anaconda3/bin/python', 'eval_offline_trajectory.py', '--task', 'transport', '--fixed_k', '30', '--device', 'cuda']' returned non-zero exit status 2."
+  },
+  {
+    "task": "transport",
+    "k": 50,
+    "status": "failed",
+    "error": "Command '['/home/yhj/anaconda3/bin/python', 'eval_offline_trajectory.py', '--task', 'transport', '--fixed_k', '50', '--device', 'cuda']' returned non-zero exit status 2."
+  }
+]

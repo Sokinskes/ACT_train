@@ -1,0 +1,15 @@
+[
+  {
+    "task": "Transport",
+    "adastep_completion": 100.0,
+    "baseline_completion": 100.0,
+    "avg_k": 50.0,
+    "inference_savings": 97.92554112554113,
+    "k_range": [
+      50,
+      50
+    ],
+    "fixed_k": null,
+    "num_inferences": 11.98
+  }
+]

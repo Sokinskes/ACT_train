@@ -1,8 +1,10 @@
+import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import torchvision.transforms as transforms
 
 from detr.main import build_ACT_model_and_optimizer, build_CNNMLP_model_and_optimizer
+from training.adastep import HorizonPredictor, AdaptiveHorizonLoss
 import IPython
 e = IPython.embed
 
@@ -14,8 +16,29 @@ class ACTPolicy(nn.Module):
         self.optimizer = optimizer
         self.kl_weight = args_override['kl_weight']
         print(f'KL Weight {self.kl_weight}')
+        
+        # AdaStep 相关配置
+        self.use_adastep = args_override.get('use_adastep', False)
+        if self.use_adastep:
+            self.horizon_predictor = HorizonPredictor(
+                input_dim=args_override.get('hidden_dim', 512),
+                hidden_dim=256
+            )
+            self.k_min = args_override.get('k_min', 5)
+            self.k_max = args_override.get('k_max', 50)
+            self.horizon_weight = args_override.get('horizon_weight', 1.0)
+            
+            # 联合损失函数
+            self.adaptive_loss = AdaptiveHorizonLoss(
+                kl_weight=self.kl_weight,
+                horizon_weight=self.horizon_weight
+            )
+            print(f'✓ AdaStep 已启用: k_min={self.k_min}, k_max={self.k_max}')
+        else:
+            self.horizon_predictor = None
+            print('✗ AdaStep 未启用（使用固定步长）')
 
-    def __call__(self, qpos, image, actions=None, is_pad=None):
+    def __call__(self, qpos, image, actions=None, is_pad=None, horizon_labels=None):
         env_state = None
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
@@ -26,16 +49,47 @@ class ACTPolicy(nn.Module):
 
             a_hat, is_pad_hat, (mu, logvar) = self.model(qpos, image, env_state, actions, is_pad)
             total_kld, dim_wise_kld, mean_kld = kl_divergence(mu, logvar)
+            
             loss_dict = dict()
-            all_l1 = F.l1_loss(actions, a_hat, reduction='none')
-            l1 = (all_l1 * ~is_pad.unsqueeze(-1)).mean()
-            loss_dict['l1'] = l1
-            loss_dict['kl'] = total_kld[0]
-            loss_dict['loss'] = loss_dict['l1'] + loss_dict['kl'] * self.kl_weight
+            
+            if self.use_adastep and horizon_labels is not None:
+                # 提取 latent feature（假设是 mu）
+                latent_feature = mu
+                
+                # 预测步长
+                horizon_pred = self.horizon_predictor(latent_feature)
+                
+                # 使用联合损失
+                horizon_labels_tensor = horizon_labels.to(qpos.device)
+                loss_dict = self.adaptive_loss.forward(
+                    action_pred=a_hat,
+                    action_gt=actions,
+                    is_pad=is_pad,
+                    kl_loss=total_kld[0],
+                    horizon_pred=horizon_pred,
+                    horizon_gt=horizon_labels_tensor
+                )
+            else:
+                # 原始损失
+                all_l1 = F.l1_loss(actions, a_hat, reduction='none')
+                l1 = (all_l1 * ~is_pad.unsqueeze(-1)).mean()
+                loss_dict['l1'] = l1
+                loss_dict['kl'] = total_kld[0]
+                loss_dict['loss'] = loss_dict['l1'] + loss_dict['kl'] * self.kl_weight
+            
             return loss_dict
         else: # inference time
-            a_hat, _, (_, _) = self.model(qpos, image, env_state) # no action, sample from prior
-            return a_hat
+            a_hat, _, (mu, _) = self.model(qpos, image, env_state) # no action, sample from prior
+            
+            # 如果启用 AdaStep，同时返回预测的步长
+            if self.use_adastep:
+                latent_feature = mu
+                predicted_horizon = self.horizon_predictor.predict_horizon(
+                    latent_feature, self.k_min, self.k_max
+                )
+                return a_hat, predicted_horizon
+            else:
+                return a_hat
 
     def configure_optimizers(self):
         return self.optimizer

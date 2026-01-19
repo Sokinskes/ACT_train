@@ -1,0 +1,72 @@
+[
+  {
+    "task": "square",
+    "k": 10,
+    "success_rate": 100.0,
+    "num_inferences": 34.96,
+    "status": "success"
+  },
+  {
+    "task": "square",
+    "k": 20,
+    "success_rate": 100.0,
+    "num_inferences": 17.76,
+    "status": "success"
+  },
+  {
+    "task": "square",
+    "k": 30,
+    "success_rate": 100.0,
+    "num_inferences": 11.94,
+    "status": "success"
+  },
+  {
+    "task": "square",
+    "k": 5,
+    "success_rate": 100.0,
+    "num_inferences": 69.42,
+    "status": "success"
+  },
+  {
+    "task": "square",
+    "k": 50,
+    "success_rate": 100.0,
+    "num_inferences": 7.4,
+    "status": "success"
+  },
+  {
+    "task": "transport",
+    "k": 10,
+    "success_rate": 100.0,
+    "num_inferences": 58.18,
+    "status": "success"
+  },
+  {
+    "task": "transport",
+    "k": 20,
+    "success_rate": 100.0,
+    "num_inferences": 29.36,
+    "status": "success"
+  },
+  {
+    "task": "transport",
+    "k": 30,
+    "success_rate": 100.0,
+    "num_inferences": 19.7,
+    "status": "success"
+  },
+  {
+    "task": "transport",
+    "k": 5,
+    "success_rate": 100.0,
+    "num_inferences": 115.92,
+    "status": "success"
+  },
+  {
+    "task": "transport",
+    "k": 50,
+    "success_rate": 100.0,
+    "num_inferences": 11.98,
+    "status": "success"
+  }
+]

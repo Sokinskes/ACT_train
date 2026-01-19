@@ -1,0 +1,15 @@
+[
+  {
+    "task": "Square",
+    "adastep_completion": 100.0,
+    "baseline_completion": null,
+    "avg_k": 20,
+    "inference_savings": null,
+    "k_range": [
+      20,
+      20
+    ],
+    "fixed_k": 20,
+    "num_inferences": 17.76
+  }
+]
