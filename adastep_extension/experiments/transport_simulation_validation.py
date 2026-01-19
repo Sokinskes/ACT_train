@@ -67,16 +67,24 @@ class TransportStateAnalyzer:
         eef_pos = obs['robot0_eef_pos']
         eef_quat = obs['robot0_eef_quat']
 
-        # 物体位置 (如果可用)
+        # 物体位置 (如果可用) — 支持不同数据布局 (长度>3 时取前3维)
         if 'object' in obs:
-            object_pos = obs['object']
+            object_pos = np.asarray(obs['object'])
+            if object_pos.ndim > 1:
+                # 有时为 (N, D) 的数组，取第一行
+                object_pos = object_pos.reshape(-1)[:3]
+            elif object_pos.size > 3:
+                object_pos = object_pos.reshape(-1)[:3]
         else:
             # 使用默认位置
             object_pos = self.object_init_pos
 
-        # 计算距离
-        eef_to_object = np.linalg.norm(eef_pos - object_pos)
-        object_to_goal = np.linalg.norm(object_pos - self.goal_pos)
+        # 计算距离（防止维度不匹配）
+        try:
+            eef_to_object = np.linalg.norm(eef_pos - object_pos)
+        except Exception:
+            eef_to_object = np.linalg.norm(np.asarray(eef_pos).reshape(-1)[:3] - np.asarray(object_pos).reshape(-1)[:3])
+        object_to_goal = np.linalg.norm(np.asarray(object_pos).reshape(-1)[:3] - self.goal_pos)
 
         # 简单的启发式规则
         if eef_to_object < 0.05:  # 接近物体
@@ -87,7 +95,7 @@ class TransportStateAnalyzer:
             return 'reaching', 0.6
 
 
-def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device='cuda'):
+def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device='cuda', render_offscreen=False):
     """
     运行Transport任务验证
 
@@ -96,6 +104,7 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
         predictor_path: 预测器模型路径
         num_episodes: 测试episode数量
         device: 计算设备
+        render_offscreen: 如果为 True，则在失败的 episode 中保存若干帧用于诊断
 
     Returns:
         results: 验证结果字典
@@ -104,6 +113,11 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
     print(f"\n{'='*80}")
     print(f"🚀 AdaStep状态级自适应仿真验证 - Transport任务")
     print(f"{'='*80}")
+
+    # 用于保存失败帧的文件夹
+    diagnostic_dir = Path('simulation_validation_results') / 'diagnostic_frames'
+    if render_offscreen:
+        diagnostic_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. 加载环境
     print("🌍 创建Transport仿真环境...")
@@ -115,6 +129,28 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
         use_image_obs=False
     )
     print(f"✓ 环境: {env.name}")
+
+    # Ensure ObsUtils is initialized (some robomimic/robosuite builds expect this before reset)
+    try:
+        import robomimic.utils.obs_utils as ObsUtils
+        if getattr(ObsUtils, 'OBS_KEYS_TO_MODALITIES', None) is None:
+            # derive keys from dataset and initialize (list-of-dict accepted)
+            import h5py
+            with h5py.File(hdf5_path, 'r') as f:
+                first_demo = next(iter(f['data'].keys()))
+                demo_grp = f[f'data/' + first_demo]
+                obs_keys = list(demo_grp['obs'].keys()) if 'obs' in demo_grp else []
+            mapping = {'low_dim': [], 'rgb': []}
+            for k in obs_keys:
+                if 'rgb' in k or 'image' in k:
+                    mapping['rgb'].append(k)
+                else:
+                    mapping['low_dim'].append(k)
+            ObsUtils.initialize_obs_utils_with_obs_specs([mapping])
+            print('Initialized ObsUtils from dataset (keys:', len(obs_keys), ')')
+    except Exception:
+        # non-fatal — env may still work with default obs setup
+        pass
 
     # 2. 加载HorizonPredictor
     print(f"🧠 加载HorizonPredictor: {predictor_path}")
@@ -187,8 +223,20 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
 
             # 执行动作 (使用专家动作或简单策略)
             # 这里使用简单的启发式策略来完成transport任务
-            action = compute_transport_action(obs, phase)
+            action = compute_transport_action(obs, phase, env=env)
+
+            # 执行动作并（可选）保存诊断帧
             obs, reward, done, info = env.step(action)
+
+            if render_offscreen and (not episode_data['success']):
+                try:
+                    # robosuite 的 render(mode='offscreen') 返回 RGB 图像
+                    frame = env.render(mode='offscreen')
+                    if frame is not None and len(frame.shape) == 3:
+                        if len(episode_data.get('diagnostic_frames', [])) < 200:
+                            episode_data.setdefault('diagnostic_frames', []).append(frame)
+                except Exception:
+                    pass
 
             step += 1
 
@@ -203,7 +251,16 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
         print(f"  结果: {'✅ 成功' if episode_data['success'] else '❌ 失败'} "
               f"({step}步, 平均k={np.mean(episode_data['k_values']):.1f})")
 
-    env.close()
+    # some env wrappers do not implement close(); be defensive
+    if hasattr(env, 'close'):
+        env.close()
+    elif hasattr(env, 'shutdown'):
+        env.shutdown()
+    else:
+        try:
+            env.viewer = None
+        except Exception:
+            pass
 
     # 5. 分析结果
     print(f"\n{'='*80}")
@@ -256,53 +313,69 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
     return results_summary
 
 
-def compute_transport_action(obs, phase):
-    """
-    计算Transport任务的动作 (简化的启发式策略)
+def compute_transport_action(obs, phase, env=None):
+    """Compute a heuristic action that supports single- and two-arm envs.
 
-    Args:
-        obs: 当前观测
-        phase: 任务阶段
+    - For single-arm envs the action is [dx,dy,dz, gripper].
+    - For multi-arm envs we populate the primary arm (robot0) and pad/mirror
+      the secondary arm entries to match env.action_dim.
 
-    Returns:
-        action: 动作向量
+    This heuristic is intentionally simple (PID-like) — it is only used for
+    closed-loop sanity checks and not for final evaluations.
     """
-    eef_pos = obs['robot0_eef_pos']
+    eef_pos = np.asarray(obs.get('robot0_eef_pos', np.zeros(3))).reshape(-1)[:3]
 
     if phase == 'reaching':
-        # 向物体移动
-        target_pos = np.array([0.0, 0.0, 0.05])  # 物体上方
-        pos_error = target_pos - eef_pos
-        action_pos = pos_error * 2.0  # 位置控制增益
-
-        # 保持抓取器张开
-        action_gripper = np.array([1.0])  # 张开
-
-    elif phase == 'grasping':
-        # 下降并抓取
-        target_pos = np.array([0.0, 0.0, 0.02])  # 物体位置
-        pos_error = target_pos - eef_pos
-        action_pos = pos_error * 3.0
-
-        # 闭合抓取器
-        action_gripper = np.array([-1.0])  # 闭合
-
-    else:  # transporting
-        # 向目标移动
-        target_pos = np.array([0.3, 0.0, 0.05])  # 目标上方
+        target_pos = np.array([0.0, 0.0, 0.05])  # above object
         pos_error = target_pos - eef_pos
         action_pos = pos_error * 2.0
+        action_gripper = np.array([1.0])
 
-        # 保持抓取器闭合
+    elif phase == 'grasping':
+        target_pos = np.array([0.0, 0.0, 0.02])
+        pos_error = target_pos - eef_pos
+        action_pos = pos_error * 3.0
         action_gripper = np.array([-1.0])
 
-    # 组合动作 (位置控制 + 抓取器)
-    action = np.concatenate([action_pos, action_gripper])
+    else:  # transporting
+        target_pos = np.array([0.3, 0.0, 0.05])
+        pos_error = target_pos - eef_pos
+        action_pos = pos_error * 2.0
+        action_gripper = np.array([-1.0])
 
-    # 限制动作范围
-    action = np.clip(action, -1.0, 1.0)
+    # single-arm base action
+    base_action = np.concatenate([action_pos, action_gripper])
+    base_action = np.clip(base_action, -1.0, 1.0)
 
-    return action
+    # determine required action dimensionality
+    action_dim = None
+    if env is not None:
+        try:
+            action_dim = int(getattr(env, 'action_dim', env.action_space.shape[0]))
+        except Exception:
+            action_dim = None
+
+    # if unknown, return single-arm action
+    if action_dim is None or action_dim == base_action.size:
+        return base_action
+
+    # otherwise expand for multi-arm: assume arms are concatenated
+    # strategy: place base_action into robot0 slot and zero-fill remaining dims
+    expanded = np.zeros(action_dim, dtype=float)
+    expanded[:base_action.size] = base_action
+
+    # if action_dim matches two-arm common layouts (e.g. 14), try mirroring gripper
+    if action_dim >= 8:
+        # copy position control to second arm's position slots if available
+        # heuristic: copy first 3 pos deltas to slots [7:10] (approximate)
+        if action_dim >= 10:
+            expanded[7:10] = expanded[0:3]
+        # set secondary gripper to same command if slot exists near the end
+        if action_dim >= 14:
+            expanded[13] = expanded[3]
+
+    return expanded
+
 
 
 def analyze_phase_k_values(all_results):
