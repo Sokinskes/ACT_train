@@ -254,7 +254,7 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
 
             # 执行动作 (使用专家动作或简单策略)
             # 这里使用简单的启发式策略来完成transport任务
-            action = compute_transport_action(obs, phase, action_dim=action_dim)
+            action = compute_transport_action(obs, phase, env=env, action_dim=action_dim)
 
             # 执行动作并（可选）保存诊断帧
             obs, reward, done, info = env.step(action)
@@ -351,8 +351,22 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
     }
 
     output_file = output_dir / "transport_validation_results.json"
+
+    def _np_safe(o):
+        # convert numpy scalars/arrays to native Python types for JSON
+        try:
+            import numpy as _np
+            if isinstance(o, _np.ndarray):
+                return o.tolist()
+            if isinstance(o, (_np.generic,)):
+                return o.item()
+        except Exception:
+            pass
+        # fallback
+        raise TypeError(f"Type not serializable: {type(o)}")
+
     with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(results_summary, f, indent=2, ensure_ascii=False)
+        json.dump(results_summary, f, indent=2, ensure_ascii=False, default=_np_safe)
 
     print(f"\n✓ 结果已保存: {output_file}")
     print(f"✓ 可视化图表已生成: {output_dir}")
