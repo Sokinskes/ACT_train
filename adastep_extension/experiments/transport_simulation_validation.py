@@ -277,6 +277,22 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
                 break
 
         episode_data['total_steps'] = step
+
+        # save diagnostic frames (if requested and available)
+        if render_offscreen and episode_data.get('diagnostic_frames'):
+            frames = episode_data['diagnostic_frames']
+            # save up to 10 evenly spaced frames for debugging
+            nsave = min(10, len(frames))
+            idxs = np.linspace(0, len(frames)-1, nsave).astype(int)
+            for i, ix in enumerate(idxs):
+                frm = frames[ix]
+                outp = diagnostic_dir / f'ep{ep+1:02d}_frame{i+1:02d}.png'
+                try:
+                    import imageio
+                    imageio.imwrite(str(outp), frm)
+                except Exception:
+                    pass
+
         all_results.append(episode_data)
 
         print(f"  结果: {'✅ 成功' if episode_data['success'] else '❌ 失败'} "
@@ -378,9 +394,8 @@ def compute_transport_action(obs, phase, env=None, action_dim=None):
     base_action = np.concatenate([action_pos, action_gripper])
     base_action = np.clip(base_action, -1.0, 1.0)
 
-    # determine required action dimensionality
-    action_dim = None
-    if env is not None:
+    # determine required action dimensionality (respect a caller-provided value)
+    if action_dim is None and env is not None:
         try:
             action_dim = int(getattr(env, 'action_dim', env.action_space.shape[0]))
         except Exception:
@@ -393,7 +408,7 @@ def compute_transport_action(obs, phase, env=None, action_dim=None):
     except Exception:
         pass
 
-    # if unknown, return single-arm action
+    # if unknown or matches base size, return single-arm action
     if action_dim is None or action_dim == base_action.size:
         return base_action
 
