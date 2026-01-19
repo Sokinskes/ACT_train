@@ -245,6 +245,12 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
             episode_data['eef_positions'].append(eef_pos.copy())
             episode_data['task_phases'].append(phase)
 
+            # DEBUG: show action_dim value just before action computation
+            try:
+                print(f"[run] action_dim (loop) = {action_dim} (type={type(action_dim)})")
+            except Exception:
+                pass
+
             # 执行动作 (使用专家动作或简单策略)
             # 这里使用简单的启发式策略来完成transport任务
             action = compute_transport_action(obs, phase, action_dim=action_dim)
