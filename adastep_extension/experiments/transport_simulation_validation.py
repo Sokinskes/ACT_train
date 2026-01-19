@@ -248,6 +248,7 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
             # DEBUG: show action_dim value just before action computation
             try:
                 print(f"[run] action_dim (loop) = {action_dim} (type={type(action_dim)})")
+                print(f"[run] compute_transport_action fn = {compute_transport_action}")
             except Exception:
                 pass
 
