@@ -19,3 +19,17 @@ scikit-learn>=1.0.0  # K-Means聚类
 numpy>=1.21.0
 torch>=1.12.0
 torchvision>=0.13.0
+
+# -----------------------------------------------------------------
+# Optional: ACT-Plus-Plus / Mobile ALOHA reproduction (extracted from CSDN)
+# See also: scripts/requirements_aloha.txt (preferred install source for reproduction)
+# -----------------------------------------------------------------
+# mujoco (pin recommended for reproduction)
+mujoco==2.3.7
+# dm_control (optional, only needed for some eval scripts)
+dm_control==1.0.14
+# robomimic: article references branch `diffusion-policy-mg` (may require mirror)
+# install with: pip install -r scripts/requirements_aloha.txt
+wandb
+diffusers
+# End of optional ALOHA / ACT reproduction block

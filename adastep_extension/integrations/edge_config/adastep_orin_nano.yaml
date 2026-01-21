@@ -1,0 +1,14 @@
+# Edge config: AdaStep + ACT (Orin Nano friendly)
+model:
+  policy_class: ACT
+  predictor: adastep
+  input_image_size: [224, 224]
+  cameras: ['top']        # keep to 1-2 cams on Nano
+  action_chunk: 10
+inference:
+  batch_size: 1
+  dtype: float16          # prefer fp16 on Orin / TensorRT
+  max_latency_ms: 40
+runtime:
+  use_tensorrt: true
+  quantize: int8          # optional; quantization workflow provided separately

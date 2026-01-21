@@ -1,0 +1,24 @@
+name: edge-smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ 'feat/adastep-lambda-robustness' ]
+
+jobs:
+  edge-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+      - name: Install deps
+        run: |
+          python -m pip install -r scripts/requirements_aloha.txt
+          pip install pytest
+      - name: Run TorchScript export smoke + tests
+        run: |
+          python integrations/export_to_torchscript.py --out tmp/adastep_smoke.pt
+          pytest -q tests/test_edge_smoke.py

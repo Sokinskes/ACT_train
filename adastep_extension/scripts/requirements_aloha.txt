@@ -1,0 +1,20 @@
+# Minimal reproduction requirements extracted from nenchoumi3119 CSDN article
+# Pin notable versions where article specifies them
+mujoco==2.3.7
+dm_control==1.0.14
+robomimic @ git+https://github.com/ARISE-Initiative/robomimic@diffusion-policy-mg  # branch may be removed upstream; see README
+diffusers
+wandb
+h5py
+opencv-python
+pyquaternion
+rospkg
+pexpect
+einops
+pyyaml
+torch>=1.12.0
+torchvision>=0.13.0
+matplotlib
+packaging
+ipython
+# Optional / system packages: xvfb (for headless rendering), mujoco binaries, mujoco license

@@ -1,0 +1,27 @@
+name: reproduce-aloha-smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ 'feat/adastep-lambda-robustness', 'main' ]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-activate-base: false
+          python-version: 3.8
+      - name: Create conda env
+        run: |
+          conda create -y -n aloha python=3.8
+          conda activate aloha
+          pip install -r scripts/requirements_aloha.txt
+      - name: Smoke: import libs & scripts
+        run: |
+          python -c "import h5py, numpy; print('h5py OK')"
+          python scripts/convert_rosbag_to_hdf5.py --out tmp/ci_sample.hdf5
+          python -c "import h5py; f=h5py.File('tmp/ci_sample.hdf5','r'); print(list(f.keys()))"
