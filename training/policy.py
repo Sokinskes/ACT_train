@@ -94,6 +94,31 @@ class ACTPolicy(nn.Module):
     def configure_optimizers(self):
         return self.optimizer
 
+    def extract_latent(self, qpos, image):
+        """Return latent feature (mu) for latent-velocity monitoring."""
+        env_state = None
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                         std=[0.229, 0.224, 0.225])
+        image = normalize(image)
+        _, _, (mu, _) = self.model(qpos, image, env_state)
+        return mu
+
+    def serialize(self):
+        """Return a serializable state for saving.
+
+        Includes the backbone ACT model and any attached AdaStep predictor (if enabled).
+        Keeping this as `state_dict()` ensures compatibility with existing save/load
+        code that expects a single dict from `policy.serialize()`.
+        """
+        return self.state_dict()
+
+    def deserialize(self, model_dict):
+        """Load a state previously returned by `serialize()`.
+
+        Returns the result of `load_state_dict` so callers can inspect missing/extra keys.
+        """
+        return self.load_state_dict(model_dict)
+
 
 class CNNMLPPolicy(nn.Module):
     def __init__(self, args_override):

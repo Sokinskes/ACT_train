@@ -25,6 +25,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--task', type=str, default='task1')
 parser.add_argument('--ckpt', type=str, default='policy_best.ckpt', 
                    help='检查点名称')
+parser.add_argument('--mode', type=str, default='latent', choices=['adastep', 'latent', 'fixed'],
+                   help='步长策略: adastep=MLP预测, latent=特征变化率, fixed=固定步长')
 args = parser.parse_args()
 task = args.task
 
@@ -83,7 +85,10 @@ if __name__ == "__main__":
     post_process = lambda a: a * stats['action_std'] + stats['action_mean']
 
     # 查询频率
-    if policy_config['use_adastep']:
+    use_latent_velocity = args.mode == 'latent'
+    use_adastep_mlp = args.mode == 'adastep'
+
+    if policy_config['use_adastep'] and (use_latent_velocity or use_adastep_mlp):
         print(f"✓ AdaStep 模式启用")
         print(f"  步长范围: [{policy_config['k_min']}, {policy_config['k_max']}]")
         use_adaptive = True
@@ -129,7 +134,13 @@ if __name__ == "__main__":
         obs_replay = []
         action_replay = []
         horizon_history = []  # 记录每步的预测步长
+        delta_history = []    # 记录latent变化率
+        mode_history = []     # 记录策略模式
         inference_times = []   # 记录推理时间
+        prev_latent = None
+        ema_delta = None
+        v_min, v_max = 0.02, 0.20
+        ema_beta = 0.9
         
         with torch.inference_mode():
             t = 0
@@ -150,14 +161,33 @@ if __name__ == "__main__":
                     if action_chunk is None or chunk_index >= len(action_chunk):
                         # 需要新的推理
                         start_time = time()
-                        result = policy(qpos, curr_image)
-                        
-                        if isinstance(result, tuple):
-                            all_actions, predicted_horizon = result
-                            k = predicted_horizon.item()
+                        if use_latent_velocity and hasattr(policy, 'extract_latent'):
+                            latent = policy.extract_latent(qpos, curr_image)
+                            if prev_latent is None:
+                                delta = 0.0
+                            else:
+                                delta = torch.norm(latent - prev_latent, p=2).item()
+                            prev_latent = latent.detach()
+                            ema_delta = delta if ema_delta is None else (ema_beta * ema_delta + (1-ema_beta) * delta)
+                            delta = float(np.clip(ema_delta, v_min, v_max))
+                            ratio = (delta - v_min) / (v_max - v_min)
+                            k = int(np.clip(np.round(policy_config['k_max'] - ratio * (policy_config['k_max'] - policy_config['k_min'])),
+                                            policy_config['k_min'], policy_config['k_max']))
+                            all_actions = policy(qpos, curr_image)
+                            if isinstance(all_actions, tuple):
+                                all_actions = all_actions[0]
+                            delta_history.append(ema_delta)
+                            mode_history.append('latent')
                         else:
-                            all_actions = result
-                            k = policy_config['k_max']  # 默认值
+                            result = policy(qpos, curr_image)
+                            if isinstance(result, tuple):
+                                all_actions, predicted_horizon = result
+                                k = predicted_horizon.item()
+                            else:
+                                all_actions = result
+                                k = policy_config['k_max']  # 默认值
+                            delta_history.append(0.0)
+                            mode_history.append('adastep')
                         
                         inference_time = (time() - start_time) * 1000  # ms
                         inference_times.append(inference_time)
@@ -167,8 +197,12 @@ if __name__ == "__main__":
                         chunk_index = 0
                         horizon_history.append(k)
                         
-                        print(f"  t={t:03d} | 预测步长: {k:2d} | "
-                              f"推理耗时: {inference_time:.2f}ms")
+                        if mode_history[-1] == 'latent':
+                            print(f"  t={t:03d} | k={k:2d} | Δz={delta_history[-1]:.4f} | "
+                                f"推理耗时: {inference_time:.2f}ms")
+                        else:
+                            print(f"  t={t:03d} | 预测步长: {k:2d} | "
+                                f"推理耗时: {inference_time:.2f}ms")
                     
                     # 取当前动作
                     raw_action = action_chunk[chunk_index]

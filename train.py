@@ -25,9 +25,15 @@ device = os.environ['DEVICE']
 
 
 def forward_pass(data, policy):
-    image_data, qpos_data, action_data, is_pad = data
+    if len(data) == 4:
+        image_data, qpos_data, action_data, is_pad = data
+        horizon_labels = None
+    else:
+        image_data, qpos_data, action_data, is_pad, horizon_labels = data
     image_data, qpos_data, action_data, is_pad = image_data.to(device), qpos_data.to(device), action_data.to(device), is_pad.to(device)
-    return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
+    if horizon_labels is not None:
+        horizon_labels = horizon_labels.to(device)
+    return policy(qpos_data, image_data, action_data, is_pad, horizon_labels) # TODO remove None
 
 def plot_history(train_history, validation_history, num_epochs, ckpt_dir, seed):
     # save training curves
@@ -122,7 +128,7 @@ if __name__ == '__main__':
 
     # load data
     train_dataloader, val_dataloader, stats, _ = load_data(data_dir, num_episodes, task_cfg['camera_names'],
-                                                            train_cfg['batch_size_train'], train_cfg['batch_size_val'])
+                                                            train_cfg['batch_size_train'], train_cfg['batch_size_val'], policy_config)
     # save stats
     stats_path = os.path.join(checkpoint_dir, f'dataset_stats.pkl')
     with open(stats_path, 'wb') as f:

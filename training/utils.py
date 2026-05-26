@@ -12,13 +12,16 @@ import IPython
 e = IPython.embed
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, camera_names, norm_stats):
+    def __init__(self, episode_ids, dataset_dir, camera_names, norm_stats, use_adastep=False, horizon_labels_dict=None, episode_files=None):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
         self.camera_names = camera_names
         self.norm_stats = norm_stats
         self.is_sim = None
+        self.use_adastep = use_adastep
+        self.horizon_labels_dict = horizon_labels_dict if horizon_labels_dict is not None else {}
+        self.episode_files = episode_files if episode_files is not None else [f'episode_{i}.hdf5' for i in range(len(episode_ids))]
         #self.__getitem__(0) # initialize self.is_sim
 
     def __len__(self):
@@ -28,7 +31,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         sample_full_episode = False # hardcode
 
         episode_id = self.episode_ids[index]
-        dataset_path = os.path.join(self.dataset_dir, f'episode_{episode_id}.hdf5')
+        dataset_path = os.path.join(self.dataset_dir, self.episode_files[episode_id])
         with h5py.File(dataset_path, 'r') as root:
             is_sim = root.attrs['sim']
             original_action_shape = root['/action'].shape
@@ -77,32 +80,43 @@ class EpisodicDataset(torch.utils.data.Dataset):
         action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
         qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
 
-        return image_data, qpos_data, action_data, is_pad
+        padded_horizon_labels = np.zeros(episode_len, dtype=np.float32)
+        if episode_id in self.horizon_labels_dict:
+            labels = self.horizon_labels_dict[episode_id]
+            padded_horizon_labels[:len(labels)] = labels
+
+        if self.use_adastep:
+            horizon_labels = torch.from_numpy(padded_horizon_labels).float()
+            return image_data, qpos_data, action_data, is_pad, horizon_labels
+        else:
+            return image_data, qpos_data, action_data, is_pad
 
 
 def get_norm_stats(dataset_dir, num_episodes):
+    episode_files = [f for f in os.listdir(dataset_dir) if f.endswith('.hdf5')]
+    episode_files = sorted(episode_files)[:num_episodes]  # take first num_episodes
     all_qpos_data = []
     all_action_data = []
-    for episode_idx in range(num_episodes):
-        dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
+    for episode_file in episode_files:
+        dataset_path = os.path.join(dataset_dir, episode_file)
         with h5py.File(dataset_path, 'r') as root:
             qpos = root['/observations/qpos'][()]
             qvel = root['/observations/qvel'][()]
             action = root['/action'][()]
         all_qpos_data.append(torch.from_numpy(qpos))
         all_action_data.append(torch.from_numpy(action))
-    all_qpos_data = torch.stack(all_qpos_data)
-    all_action_data = torch.stack(all_action_data)
-    all_action_data = all_action_data
+    # concatenate instead of stack
+    all_qpos_data = torch.cat(all_qpos_data, dim=0)
+    all_action_data = torch.cat(all_action_data, dim=0)
 
     # normalize action data
-    action_mean = all_action_data.mean(dim=[0, 1], keepdim=True)
-    action_std = all_action_data.std(dim=[0, 1], keepdim=True)
+    action_mean = all_action_data.mean(dim=[0], keepdim=True)
+    action_std = all_action_data.std(dim=[0], keepdim=True)
     action_std = torch.clip(action_std, 1e-2, np.inf) # clipping
 
     # normalize qpos data
-    qpos_mean = all_qpos_data.mean(dim=[0, 1], keepdim=True)
-    qpos_std = all_qpos_data.std(dim=[0, 1], keepdim=True)
+    qpos_mean = all_qpos_data.mean(dim=[0], keepdim=True)
+    qpos_std = all_qpos_data.std(dim=[0], keepdim=True)
     qpos_std = torch.clip(qpos_std, 1e-2, np.inf) # clipping
 
     stats = {"action_mean": action_mean.numpy().squeeze(), "action_std": action_std.numpy().squeeze(),
@@ -112,20 +126,54 @@ def get_norm_stats(dataset_dir, num_episodes):
     return stats
 
 
-def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val):
+def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, policy_config=None):
     print(f'\nData from: {dataset_dir}\n')
+    use_adastep = policy_config.get('use_adastep', False) if policy_config else False
+    horizon_labels_dict = {}
+    episode_files = [f for f in os.listdir(dataset_dir) if f.endswith('.hdf5')]
+    episode_files = sorted(episode_files)[:num_episodes]
+    if use_adastep:
+        print('Generating AdaStep horizon labels...')
+        from training.adastep import StateClusterAnalyzer
+        analyzer = StateClusterAnalyzer(
+            num_clusters=policy_config.get('num_clusters', 10),
+            error_threshold=policy_config.get('error_threshold', 0.5)
+        )
+        # collect all states and actions
+        all_states = []
+        all_action_seqs = []
+        for episode_file in episode_files:
+            dataset_path = os.path.join(dataset_dir, episode_file)
+            with h5py.File(dataset_path, 'r') as root:
+                qpos = root['/observations/qpos'][()]
+                action = root['/action'][()]
+            all_states.append(qpos)
+            all_action_seqs.append(action)
+        concatenated_states = np.concatenate(all_states, axis=0)
+        analyzer.fit_clusters(concatenated_states)
+        analyzer.pareto_analysis(all_states, all_action_seqs, 
+                                k_min=policy_config.get('k_min', 5), 
+                                k_max=policy_config.get('k_max', 50))
+        # generate labels for each episode
+        for idx, episode_file in enumerate(episode_files):
+            dataset_path = os.path.join(dataset_dir, episode_file)
+            with h5py.File(dataset_path, 'r') as root:
+                qpos = root['/observations/qpos'][()]
+            labels = analyzer.get_labels(qpos)
+            horizon_labels_dict[idx] = labels.squeeze()
+        print('AdaStep labels generated.')
+    
     # obtain train test split
-    train_ratio = 0.8
     shuffled_indices = np.random.permutation(num_episodes)
-    train_indices = shuffled_indices[:int(train_ratio * num_episodes)]
-    val_indices = shuffled_indices[int(train_ratio * num_episodes):]
+    train_indices = shuffled_indices[:int(0.8 * num_episodes)]
+    val_indices = shuffled_indices[int(0.8 * num_episodes):]
 
     # obtain normalization stats for qpos and action
     norm_stats = get_norm_stats(dataset_dir, num_episodes)
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, camera_names, norm_stats)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, camera_names, norm_stats)
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, camera_names, norm_stats, use_adastep, horizon_labels_dict, episode_files)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, camera_names, norm_stats, use_adastep, horizon_labels_dict, episode_files)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
 

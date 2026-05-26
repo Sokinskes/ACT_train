@@ -4,7 +4,7 @@ os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = "1"
 import torch
 
 # data directory
-DATA_DIR = 'data/'
+DATA_DIR = '/home/yhj/ACT/data/Act'
 
 # checkpoint directory
 CHECKPOINT_DIR = 'checkpoints/'
@@ -53,7 +53,7 @@ POLICY_CONFIG = {
     'temporal_agg': False,
     
     # AdaStep 自适应步长配置
-    'use_adastep': True,           # 是否启用 AdaStep
+    'use_adastep': False,           # 是否启用 AdaStep
     'k_min': 5,                    # 最小执行步长（复杂状态：精密操作）
     'k_max': 50,                   # 最大执行步长（简单状态：大范围移动）
     'horizon_weight': 1.0,         # 步长预测损失权重

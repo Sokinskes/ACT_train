@@ -63,6 +63,7 @@ class TransportStateAnalyzer:
             phase: 'reaching', 'grasping', 'transporting'
             confidence: 置信度 (0-1)
         """
+
         # 提取关键信息
         eef_pos = obs['robot0_eef_pos']
         eef_quat = obs['robot0_eef_quat']
@@ -95,7 +96,169 @@ class TransportStateAnalyzer:
             return 'reaching', 0.6
 
 
-def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device='cuda', render_offscreen=False):
+def align_env_initial_state(env, demo_init_obs, action_dim=None, logger=print):
+    """Attempt to align simulator initial state to a demo first-frame observation.
+
+    Strategy (robust/fallbacks, non-destructive):
+      - Prefer direct body assignment by name.
+      - If name lookup fails, pick the non-robot body whose current position is
+        closest to the demo object position and move that body (pragmatic debug).
+      - If direct writes are impossible, fall back to a zero-step refresh so the
+        caller can re-query obs.
+
+    Returns a dict with diagnostics: {'applied': bool, 'method': str, 'body_name': str, 'body_id': int,
+    'pre_pos': ..., 'post_pos': ..., 'error': ...}
+    """
+    out = {'applied': False, 'method': None, 'body_name': None, 'body_id': None,
+           'pre_pos': None, 'post_pos': None, 'error': None}
+
+    if demo_init_obs is None:
+        out['error'] = 'no demo_init_obs'
+        return out
+
+    # extract demo object position (robust to several key names / layouts)
+    cand_keys = ['object', 'object_pos', 'object0_pos', 'object0']
+    demo_obj = None
+    if isinstance(demo_init_obs, dict):
+        for k in cand_keys:
+            if k in demo_init_obs:
+                try:
+                    demo_obj = np.asarray(demo_init_obs[k]).reshape(-1)[:3].astype(float)
+                    break
+                except Exception:
+                    demo_obj = None
+    if demo_obj is None:
+        try:
+            a = np.asarray(demo_init_obs).reshape(-1)
+            if a.size >= 3:
+                demo_obj = a[:3].astype(float)
+        except Exception:
+            demo_obj = None
+
+    if demo_obj is None:
+        out['error'] = 'could not extract object pos from demo_init_obs'
+        return out
+
+    # Robustly find underlying mujoco sim/model/data through common wrappers
+    sim = None
+    model = None
+    data = None
+    candidates = [env, getattr(env, 'env', None), getattr(env, 'wrapped_env', None), getattr(env, '_wrapped_env', None), getattr(env, 'unwrapped', None)]
+    for cand in candidates:
+        if cand is None:
+            continue
+        if hasattr(cand, 'sim'):
+            sim = getattr(cand, 'sim')
+            break
+        # some wrappers expose model/data directly
+        if hasattr(cand, 'model') and hasattr(cand, 'data'):
+            sim = cand
+            break
+        # robosuite sometimes exposes mujoco_sim
+        if hasattr(cand, 'mujoco_sim'):
+            sim = getattr(cand, 'mujoco_sim')
+            break
+    if sim is None:
+        # last attempt: env may provide a helper
+        for fn in ['get_sim', '_get_sim']:
+            try:
+                getter = getattr(env, fn, None)
+                if getter is not None:
+                    sim = getter()
+                    break
+            except Exception:
+                pass
+
+    if sim is None:
+        out['error'] = 'env/sim not found through common wrappers'
+        return out
+
+    model = getattr(sim, 'model', None)
+    data = getattr(sim, 'data', None)
+
+    # 1) try to find a body whose name contains 'object'
+    body_id = None
+    body_name = None
+    try:
+        names = [n.decode('utf-8') if isinstance(n, bytes) else n for n in model.body_names]
+        for i, n in enumerate(names):
+            if 'object' in n.lower():
+                body_id = i
+                body_name = n
+                break
+    except Exception:
+        names = None
+
+    # 2) if not found by name, pick the nearest non-robot body as pragmatic fallback
+    if body_id is None and data is not None:
+        try:
+            # gather candidate bodies and their positions
+            bpos = np.array(data.body_xpos)
+            # try to exclude robot bodies by name if available
+            candidates = list(range(bpos.shape[0]))
+            if names is not None:
+                bad = [i for i, n in enumerate(names) if any(x in n.lower() for x in ['robot', 'gripper', 'hand', 'panda', 'ur5'])]
+                candidates = [c for c in candidates if c not in bad]
+            # compute distances
+            dists = np.linalg.norm(bpos[candidates, :3] - demo_obj.reshape(1, 3), axis=1)
+            best_idx = int(np.argmin(dists))
+            body_id = candidates[best_idx]
+            body_name = names[body_id] if names is not None else f'body_{body_id}'
+        except Exception as e:
+            out['error'] = f'nearest-body fallback failed: {e}'
+            body_id = None
+
+    # attempt write to sim.data.body_xpos
+    if body_id is not None and data is not None:
+        try:
+            pre = data.body_xpos[body_id].copy()
+            out['pre_pos'] = pre[:3].tolist()
+            data.body_xpos[body_id][:3] = demo_obj
+            try:
+                sim.forward()
+            except Exception:
+                pass
+            post = data.body_xpos[body_id].copy()
+            out.update({'applied': True, 'method': 'body_xpos', 'body_id': int(body_id), 'body_name': body_name, 'post_pos': post[:3].tolist()})
+            return out
+        except Exception as e:
+            out['error'] = f'body_xpos write failed: {e}'
+
+    # fallback: try model.body_pos if writable
+    try:
+        if model is not None and hasattr(model, 'body_pos') and body_id is not None:
+            model.body_pos[body_id][:3] = demo_obj
+            try:
+                sim.forward()
+            except Exception:
+                pass
+            post = data.body_xpos[body_id].copy() if data is not None else None
+            out.update({'applied': True, 'method': 'model.body_pos', 'body_id': int(body_id), 'body_name': body_name, 'post_pos': post[:3].tolist() if post is not None else None})
+            return out
+    except Exception as e:
+        out['error'] = f'model.body_pos write failed: {e}'
+
+    # last-resort: zero-step refresh so caller can observe changes elsewhere
+    try:
+        if action_dim is None:
+            try:
+                action_dim = int(getattr(env, 'action_dim', None) or getattr(env, 'action_size', None) or env.action_space.shape[0])
+            except Exception:
+                action_dim = None
+        zero = np.zeros(action_dim) if action_dim is not None else np.zeros(4)
+        try:
+            obs_after, _, _, _ = env.step(zero)
+            out.update({'applied': True, 'method': 'zero_step_refresh', 'post_pos': None})
+            return out
+        except Exception as e:
+            out['error'] = f'zero-step failed: {e}'
+    except Exception as e:
+        out['error'] = f'fallback failed: {e}'
+
+    return out
+
+
+def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device='cuda', render_offscreen=False, align_with_demo=False):
     """
     运行Transport任务验证
 
@@ -129,6 +292,35 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
         use_image_obs=False
     )
     print(f"✓ 环境: {env.name}")
+
+    # If requested, extract one demo's first-frame observation for alignment checks
+    demo_init_obs = None
+    # probe dataset lazily (non-fatal)
+    try:
+        import h5py
+        with h5py.File(hdf5_path, 'r') as f:
+            all_keys = sorted(f['data'].keys())
+            # pick a held-out test demo (first after train split)
+            num_train = int(len(all_keys) * 0.8)
+            test_keys = all_keys[num_train: num_train + 5]
+            if test_keys:
+                d0 = f[f'data/' + test_keys[0]]
+                if 'obs' in d0:
+                    # choose first obs entry available
+                    try:
+                        demo_init_obs = {k: d0['obs'][k][0] for k in d0['obs'].keys()}
+                    except Exception:
+                        try:
+                            demo_init_obs = dict(d0['obs'][()])[0]
+                        except Exception:
+                            demo_init_obs = None
+                elif 'states' in d0:
+                    try:
+                        demo_init_obs = {'state': d0['states'][0]}
+                    except Exception:
+                        demo_init_obs = None
+    except Exception:
+        demo_init_obs = None
 
     # probe environment for action dimensionality (robust to wrappers)
     action_dim = None
@@ -209,6 +401,179 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
 
         # 重置环境
         obs = env.reset()
+
+        # If requested, align env initial state to a demo first-frame and refresh obs
+        if align_with_demo and demo_init_obs is not None:
+            diag = align_env_initial_state(env, demo_init_obs, action_dim=action_dim, logger=print)
+            # try to refresh observation without advancing time; fall back to a zero-step
+            try:
+                if hasattr(env, '_get_observation'):
+                    obs = env._get_observation()
+                elif hasattr(env, 'get_observation'):
+                    obs = env.get_observation()
+                else:
+                    zero = np.zeros(action_dim) if action_dim is not None else np.zeros(4)
+                    obs, _, _, _ = env.step(zero)
+            except Exception:
+                try:
+                    zero = np.zeros(action_dim) if action_dim is not None else np.zeros(4)
+                    obs, _, _, _ = env.step(zero)
+                except Exception:
+                    pass
+
+            # Attempt to set robot initial qpos from demo (if available) — improves replay fidelity
+            qpos_diag = {'applied': False, 'num_set': 0, 'from_states': False, 'error': None}
+            try:
+                demo_q = None
+                demo_states_available = False
+                # prefer full simulator 'states' if present in dataset (more reliable)
+                try:
+                    import h5py
+                    with h5py.File(hdf5_path, 'r') as hf:
+                        all_keys = sorted(hf['data'].keys())
+                        num_train = int(len(all_keys) * 0.8)
+                        test_keys = all_keys[num_train: num_train + 1]
+                        if test_keys:
+                            d0 = hf['data/' + test_keys[0]]
+                            if 'states' in d0:
+                                st = d0['states'][0]
+                                demo_states_available = True
+                                demo_q = np.asarray(st).reshape(-1).astype(float)
+                except Exception:
+                    demo_states_available = False
+
+                # fallback: individual robot joint positions
+                if demo_q is None and isinstance(demo_init_obs, dict):
+                    for k in ['robot0_joint_pos', 'robot0_joint_qpos', 'robot0_qpos']:
+                        if k in demo_init_obs:
+                            demo_q = np.asarray(demo_init_obs[k]).reshape(-1).astype(float)
+                            break
+
+                if demo_q is not None:
+                    # locate sim through common wrappers
+                    sim = None
+                    for cand in [env, getattr(env, 'env', None), getattr(env, 'wrapped_env', None), getattr(env, '_wrapped_env', None)]:
+                        if cand is None:
+                            continue
+                        if hasattr(cand, 'sim'):
+                            sim = getattr(cand, 'sim')
+                            break
+                        if hasattr(cand, 'model') and hasattr(cand, 'data'):
+                            sim = cand
+                            break
+                    if sim is not None:
+                        model = getattr(sim, 'model', None)
+                        data = getattr(sim, 'data', None)
+                        if model is not None and data is not None:
+                            nq = int(getattr(model, 'nq', getattr(model, 'nq', None) or 0))
+                            # if demo provides full state vector, map first nq entries into qpos
+                            if demo_states_available and demo_q.size >= nq:
+                                try:
+                                    data.qpos[:nq] = demo_q[:nq]
+                                    qpos_diag['num_set'] = nq
+                                    qpos_diag['from_states'] = True
+                                except Exception as e:
+                                    qpos_diag['error'] = f'write full qpos failed: {e}'
+                            else:
+                                # find robot-related joints and write qpos entries sequentially
+                                names = [n.decode('utf-8') if isinstance(n, bytes) else n for n in model.joint_names]
+                                robot_joint_ids = [i for i, n in enumerate(names) if 'robot0' in n or n.startswith('robot') or 'right' in n or 'left' in n]
+                                ptr = 0
+                                for jid in robot_joint_ids:
+                                    adr = int(model.jnt_qposadr[jid])
+                                    # determine dof per joint: use model.jnt_type to infer scalar vs 3-DOF etc.
+                                    ndof = 1
+                                    try:
+                                        # try to use jnt_qposadr of next joint to infer dof (safe fallback)
+                                        ndof = 1
+                                    except Exception:
+                                        ndof = 1
+                                    if ptr + ndof <= demo_q.size:
+                                        try:
+                                            data.qpos[adr: adr + ndof] = demo_q[ptr: ptr + ndof]
+                                            qpos_diag['num_set'] += ndof
+                                            ptr += ndof
+                                        except Exception:
+                                            break
+                            try:
+                                sim.forward()
+                                qpos_diag['applied'] = qpos_diag['num_set'] > 0
+                            except Exception:
+                                pass
+            except Exception as e:
+                qpos_diag['error'] = str(e)
+
+            # If object aligned but EEF far from object, run a short priming trajectory to bring EEF closer
+            priming_info = {'primed': False, 'steps': 0, 'start_dist': None, 'end_dist': None}
+            try:
+                demo_obj_pos = None
+                if isinstance(demo_init_obs, dict):
+                    for k in ['object', 'object_pos', 'object0_pos', 'object0']:
+                        if k in demo_init_obs:
+                            demo_obj_pos = np.asarray(demo_init_obs[k]).reshape(-1)[:3].astype(float)
+                            break
+                if demo_obj_pos is None and diag.get('post_pos') is not None:
+                    demo_obj_pos = np.asarray(diag.get('post_pos'))
+
+                if demo_obj_pos is not None:
+                    eef = np.asarray(obs.get('robot0_eef_pos', np.zeros(3))).reshape(-1)[:3].astype(float)
+                    start_d = float(np.linalg.norm(eef - demo_obj_pos))
+                    priming_info['start_dist'] = start_d
+                    # only prime if EEF is meaningfully far (>6cm)
+                    if start_d > 0.06:
+                        max_prime = 20
+                        for ps in range(max_prime):
+                            # compute a direct delta action toward demo_obj_pos (aim slightly above)
+                            try:
+                                eef = np.asarray(obs.get('robot0_eef_pos', np.zeros(3))).reshape(-1)[:3].astype(float)
+                                target_pos = demo_obj_pos + np.array([0.0, 0.0, 0.05])
+                                pos_error = target_pos - eef
+                                action_pos = pos_error * 2.0
+                                action_gripper = np.array([1.0])
+                                base_action = np.clip(np.concatenate([action_pos, action_gripper]), -1.0, 1.0)
+                                # expand for multi-arm if needed
+                                if action_dim is None:
+                                    try:
+                                        ad = int(getattr(env, 'action_dim', None) or getattr(env, 'action_size', None) or env.action_space.shape[0])
+                                    except Exception:
+                                        ad = base_action.size
+                                else:
+                                    ad = action_dim
+                                if ad == base_action.size:
+                                    act = base_action
+                                else:
+                                    expanded = np.zeros(ad, dtype=float)
+                                    expanded[:base_action.size] = base_action
+                                    if ad >= 10:
+                                        expanded[7:10] = expanded[0:3]
+                                    if ad >= 14:
+                                        expanded[13] = expanded[3]
+                                    act = expanded
+                                obs, _, _, _ = env.step(act)
+                                priming_info['steps'] += 1
+                            except Exception:
+                                try:
+                                    zero = np.zeros(action_dim) if action_dim is not None else np.zeros(4)
+                                    obs, _, _, _ = env.step(zero)
+                                    priming_info['steps'] += 1
+                                except Exception:
+                                    break
+
+                            # recompute distance
+                            eef = np.asarray(obs.get('robot0_eef_pos', np.zeros(3))).reshape(-1)[:3].astype(float)
+                            dnow = float(np.linalg.norm(eef - demo_obj_pos))
+                            if dnow <= 0.06:
+                                priming_info['primed'] = True
+                                break
+                        priming_info['end_dist'] = float(np.linalg.norm(eef - demo_obj_pos))
+            except Exception as e:
+                priming_info['error'] = str(e)
+
+            # save alignment diagnostics into episode-level metadata for later inspection
+            episode_alignment = {**diag, 'qpos_alignment': qpos_diag, 'priming': priming_info}
+        else:
+            episode_alignment = None
+
         done = False
         step = 0
         max_steps = 400
@@ -219,7 +584,8 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
             'eef_positions': [],
             'task_phases': [],
             'success': False,
-            'total_steps': 0
+            'total_steps': 0,
+            'alignment_diag': episode_alignment
         }
 
         while step < max_steps and not done:
@@ -347,7 +713,8 @@ def run_transport_validation(hdf5_path, predictor_path, num_episodes=10, device=
         'avg_k': np.mean(avg_k_values),
         'phase_analysis': phase_k_stats,
         'validation': validation_results,
-        'episodes': len(all_results)
+        'episodes': len(all_results),
+        'episodes_data': all_results
     }
 
     output_file = output_dir / "transport_validation_results.json"
