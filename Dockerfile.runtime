@@ -1,0 +1,39 @@
+# 用于开发和测试的 Dockerfile（轻量化版本）
+FROM pytorch/pytorch:2.8.0-cuda12.1-cudnn8-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    TZ=Asia/Shanghai
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    wget \
+    libgl1-mesa-glx \
+    libglvnd0 \
+    libx11-dev \
+    libxkbcommon0 \
+    libxcb1 \
+    libxext6 \
+    libxrender1 \
+    xvfb \
+    patchelf \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+COPY . /workspace/
+
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install -r requirements.txt
+
+# 验证核心依赖
+RUN python -c "import torch; print(f'PyTorch {torch.__version__}')" && \
+    python -c "import dm_control; print('dm_control OK')" && \
+    python -c "import mujoco; print('MuJoCo OK')"
+
+ENTRYPOINT ["/bin/bash"]
+CMD ["-i"]
