@@ -27,7 +27,27 @@ venv.bak/
 .vscode/
 .idea/
 
-# Tarballs
+# Archives
 *.tar.gz
 *.zip
-*.png\n*.jpg\n*.log\n*.pdf\n*.aux\n*.log\n*.fdb_latexmk\n*.fls\n*.blg\n*.bbl
+
+# Experiment artifacts
+*.png
+*.jpg
+*.jpeg
+*.log
+*.pdf
+*.aux
+*.fdb_latexmk
+*.fls
+*.blg
+*.bbl
+
+# Generated experiment/result folders
+adastep_extension/**/results/
+adastep_extension/**/stage3_validation/
+adastep_extension/**/sensitivity_results/
+adastep_extension/**/fixed_k_baselines/
+adastep_extension/**/latex_submission/
+third_party/act-plus-plus/wandb/
+third_party/act-plus-plus/.git_local_backup_adastep/
